@@ -1,0 +1,34 @@
+==============================================================================
+   OPTIONAL CHEAT SAVE: LEVEL 50 + 100K GOLD + 100K SILVER + ALL MAPS UNLOCKED
+==============================================================================
+
+[ENGLISH]
+If you want to jump straight to high-level content, test weapons, or fight
+all bosses (Dragon, Boss Rush, Volcano, Desert, Towers) without grinding:
+
+1. Close the game if it is running.
+2. Copy the "savegame.bin" file from this folder.
+3. Go back to the main game directory and open the "Saves" folder.
+4. Paste "savegame.bin" into the "Saves" folder (overwrite if asked).
+5. Launch EternityWarriors2.exe and enjoy your maxed-out hero!
+
+* To start fresh again:
+  Simply delete "savegame.bin" from the "Saves" folder. The game will automatically
+  create a new clean save file on the next launch.
+
+------------------------------------------------------------------------------
+
+[РУССКИЙ]
+Если вы хотите сразу опробовать высокоуровневый контент, испытать оружие
+или пойти на любых боссов (Дракон, Босс Раш, Вулкан, Пустыня, Башни) без гринда:
+
+1. Закройте игру, если она запущена.
+2. Скопируйте файл "savegame.bin" из этой папки.
+3. Вернитесь в главную папку игры и откройте папку "Saves".
+4. Вставьте "savegame.bin" в папку "Saves" (с заменой, если спросит).
+5. Запустите EternityWarriors2.exe и наслаждайтесь прокачанным героем!
+
+* Чтобы начать с чистого листа:
+  Просто удалите "savegame.bin" из папки "Saves". Игра сама создаст новое чистое
+  сохранение с обучением при следующем запуске.
+==============================================================================
