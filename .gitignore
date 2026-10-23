@@ -1,0 +1,37 @@
+# Build outputs
+port/build/
+host/build-win/
+host/glbridge/*.exe
+host/glbridge/*.dll
+host/glbridge/*.pdb
+host/glbridge/*.lib
+host/glbridge/*.obj
+host/glbridge/*.exp
+
+# Local toolchains & dependencies
+third_party/zig/
+third_party/sysroot-armhf/
+third_party/sdl2-win/
+third_party/angle/
+third_party/khronos/
+third_party/qemu/
+third_party/wsl-distro/
+third_party/qemu-guest/wsl_runner
+third_party/qemu-guest/start_wsl.sh
+third_party/qemu-guest/init
+third_party/qemu-guest/vmlinuz
+third_party/qemu-guest/bzImage-arm
+third_party/qemu-guest/ew2_initrd.cpio
+sdl-arm/
+
+# Extracted game data (APK / OBB / native libs)
+ew2data/
+
+# Logs and runtime temp files
+logs/
+ctl/commands
+ctl/*.bmp
+ctl/*.png
+ctl/shot
+*.log
+__pycache__/

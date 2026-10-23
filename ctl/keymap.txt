@@ -1,0 +1,19 @@
+# Eternity Warriors 2 PC Bridge Keymap (normalized 0.0..1.0 coordinates for 1280x720)
+# Controls:
+#   W, A, S, D / Arrows   -> joystick (8-directional movement)
+#   LMB (in battle mode)  -> attack   (Axe primary combo; F1 toggles touch/battle)
+#   RMB                   -> skill2   (Block / Shield / Parry)
+#   Space                 -> skill3   (Dash / Roll / Evade)
+#   MMB (hold)            -> skill1   (Charged Whirlwind, steered with WASD)
+#   Key 1                 -> hp       (Health Potion)
+#   Key 2                 -> rage     (Rage Potion)
+
+joystick 0.1800 0.7200 0.1200
+attack   0.9227 0.8625
+skill1   0.8328 0.7028
+skill2   0.9313 0.6528
+skill3   0.8047 0.8778
+hp       0.9648 0.3597
+rage     0.9648 0.2347
+pause    0.9625 0.0708
+special  0.9625 0.5069

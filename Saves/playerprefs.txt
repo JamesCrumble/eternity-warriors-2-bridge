@@ -1,0 +1,21 @@
+4.2.1	s:1235b6d0f85c2259a63f66d5723b6547
+AndroidLastRecordedDoubleCoinFlag	s:false
+AndroidLastRestoreTransactionRequestTime	s:10/21/2026 17:43:03
+BuildNumber	s:
+CrashHc	i:0
+LastRunAssetBundleDatabaseId	s:fbf12d79
+LatestAppVersion	s:4.3.1
+LatestAssetBundleDatabaseId	s:fbf12d79
+PUNCloudBestRegion	s:EU
+Screenmanager Is Fullscreen mode	i:0
+Screenmanager Resolution Height	i:720
+Screenmanager Resolution Width	i:1280
+_bundleCDNUrl	s:http://d2fo9k0pax5pvp.cloudfront.net/ew2/{0}
+_bundleS3Url	s:http://bjstudio.s3.amazonaws.com/ew2/{0}
+_useS3WhenCdnFail	i:1
+_useVersionUrl	i:0
+_versionUrl	s:http://bjstudio.s3.amazonaws.com/ew2/{0}/{1}/generic/{2}/version
+groupTable	s:AAAAAAAAAA
+isPvPServerOnLine	i:0
+isServerOnLine	s:false
+unity_version	i:5

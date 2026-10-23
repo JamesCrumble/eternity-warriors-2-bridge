@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Generates the GLES bridge glue shared by the guest (ARM32 port) and the host (ew3gl, C).
+
+  python3 tools/gen_glbridge.py        (run from the project root)
+
+Writes
+  port/src/gl_bridge_gen.inc                op codes + guest stubs for the scalar GL calls
+  host/glbridge/gl_ops_gen.inc              op codes + host dispatch for the same calls (C)
+
+Taken from ../shadowgun-probe (apk/tools/gen_glbridge.py), whose Java output it replaces.
+
+Wire format, guest -> host (little endian), one message per call:
+  u32 total_length (header included, multiple of 4)   u32 op   payload...
+Replies, host -> guest, only for the synchronous queries:
+  u32 length   bytes
+The scalar calls below carry only int32/float32 arguments; ids of GL objects are allocated by the
+guest and translated to real names by the host (kinds T B F R P S).
+"""
+import os
+
+# name, argument spec, hooked (guest wrapper adds local bookkeeping around the raw stub)
+# spec letters: e GLenum, i GLint, s GLsizei, u GLuint, m GLbitfield, b GLboolean, f GLfloat,
+#               T texture, F framebuffer, R renderbuffer, P program, S shader (guest id -> host name)
+SIMPLE = [
+    ("glActiveTexture", "e", False),
+    ("glBlendColor", "ffff", False),
+    ("glBlendEquation", "e", False),
+    ("glBlendEquationSeparate", "ee", False),
+    ("glBlendFunc", "ee", False),
+    ("glBlendFuncSeparate", "eeee", False),
+    ("glClear", "m", False),
+    ("glClearColor", "ffff", False),
+    ("glClearDepthf", "f", False),
+    ("glClearStencil", "i", False),
+    ("glColorMask", "bbbb", False),
+    ("glCullFace", "e", False),
+    ("glDepthFunc", "e", False),
+    ("glDepthMask", "b", False),
+    ("glDepthRangef", "ff", False),
+    ("glDisable", "e", False),
+    ("glEnable", "e", False),
+    ("glFrontFace", "e", False),
+    ("glGenerateMipmap", "e", False),
+    ("glLineWidth", "f", False),
+    ("glPixelStorei", "ei", True),
+    ("glPolygonOffset", "ff", False),
+    ("glSampleCoverage", "fb", False),
+    ("glScissor", "iiss", False),
+    ("glStencilFunc", "eiu", False),
+    ("glStencilMask", "u", False),
+    ("glStencilOp", "eee", False),
+    ("glTexParameterf", "eef", False),
+    ("glTexParameteri", "eei", False),
+    ("glUniform1f", "if", False),
+    ("glUniform1i", "ii", False),
+    ("glViewport", "iiss", False),
+    ("glVertexAttrib4f", "uffff", False),
+    ("glCopyTexSubImage2D", "eiiiiiss", False),
+    ("glEnableVertexAttribArray", "u", True),
+    ("glDisableVertexAttribArray", "u", True),
+    ("glBindTexture", "eT", False),
+    ("glBindFramebuffer", "eF", False),
+    ("glBindRenderbuffer", "eR", False),
+    ("glUseProgram", "P", False),
+    ("glAttachShader", "PS", False),
+    ("glCompileShader", "S", False),
+    ("glLinkProgram", "P", True),
+    ("glDeleteProgram", "P", False),
+    ("glDeleteShader", "S", False),
+    ("glFramebufferRenderbuffer", "eeeR", False),
+    ("glFramebufferTexture2D", "eeeTi", False),
+    ("glRenderbufferStorage", "eess", False),
+    ("glHint", "ee", False),
+    ("glStencilFuncSeparate", "eeiu", False),
+    ("glStencilMaskSeparate", "eu", False),
+    ("glStencilOpSeparate", "eeee", False),
+    ("glVertexAttrib1f", "uf", False),
+    ("glVertexAttrib2f", "uff", False),
+    ("glVertexAttrib3f", "ufff", False),
+    ("glDetachShader", "PS", False),
+    ("glValidateProgram", "P", False),
+    ("glCopyTexImage2D", "eieiissi", False),
+]
+
+# Hand-written operations (payload layout documented where they are encoded, gl_bridge.cpp / GlBridge.java).
+MANUAL = [
+    "SWAP", "GEN", "DELETE", "BIND_BUFFER", "BUFFER_DATA", "BUFFER_SUB_DATA",
+    "TEX_IMAGE_2D", "TEX_SUB_IMAGE_2D", "COMPRESSED_TEX_IMAGE_2D", "COMPRESSED_TEX_SUB_IMAGE_2D",
+    "TEX_IMAGE_3D", "TEX_SUB_IMAGE_3D", "COMPRESSED_TEX_IMAGE_3D", "COMPRESSED_TEX_SUB_IMAGE_3D",
+    "CREATE_SHADER", "CREATE_PROGRAM", "SHADER_SOURCE", "UNIFORM_V",
+    "ATTRIB_POINTER_VBO", "DRAW_ARRAYS", "DRAW_ELEMENTS", "INVALIDATE_FB", "BIND_ATTRIB_LOC",
+    # synchronous queries: the guest blocks until the reply arrives
+    "Q_GET_STRING", "Q_GET_INTEGERV", "Q_GET_FLOATV", "Q_GET_SHADERIV", "Q_GET_PROGRAMIV",
+    "Q_SHADER_LOG", "Q_PROGRAM_LOG", "Q_SHADER_SOURCE", "Q_ACTIVE_ATTRIB", "Q_ACTIVE_UNIFORM",
+    "Q_ATTRIB_LOC", "Q_UNIFORM_LOC", "Q_CHECK_FB", "Q_READ_PIXELS",
+]
+
+C_TYPES = {"e": "GLenum", "i": "GLint", "s": "GLsizei", "u": "GLuint", "m": "GLbitfield",
+           "b": "GLboolean", "f": "GLfloat", "T": "GLuint", "F": "GLuint", "R": "GLuint",
+           "P": "GLuint", "S": "GLuint"}
+MAP_FIELD = {"T": "tex", "F": "fbo", "R": "rbo", "P": "prog", "S": "shader"}
+
+
+def java_arg(c):
+    if c in MAP_FIELD:
+        return "ids.%s.get(b.getInt())" % MAP_FIELD[c]
+    if c == "f":
+        return "b.getFloat()"
+    if c == "b":
+        return "b.getInt() != 0"
+    return "b.getInt()"
+
+
+def op_names():
+    names = ["OP_" + m for m in MANUAL]
+    names += ["OP_" + n for n, _, _ in SIMPLE]
+    return names
+
+
+def gen_c(path):
+    out = ["/* Generated by tools/gen_glbridge.py - do not edit. */", ""]
+    out.append("enum GlBridgeOp {")
+    for i, n in enumerate(op_names()):
+        out.append("    GB_%s = %d," % (n, i + 1))
+    out.append("};")
+    out.append("")
+    out.append("#define GB_SIMPLE_CALLS(X) \\")
+    out.append(" \\\n".join("    X(%s)" % n for n, _, _ in SIMPLE))
+    out.append("")
+    for name, spec, hooked in SIMPLE:
+        stub = ("gb_raw_" if hooked else "gb_") + name
+        params = ", ".join("%s a%d" % (C_TYPES[c], i) for i, c in enumerate(spec))
+        out.append("static void %s(%s)" % (stub, params))
+        out.append("{")
+        out.append("    int32_t w[%d];" % len(spec))
+        for i, c in enumerate(spec):
+            out.append("    gb_put(&w[%d], a%d);" % (i, i))
+        out.append("    gb_cmd(GB_OP_%s, w, %d, NULL, 0);" % (name, 4 * len(spec)))
+        out.append("}")
+        out.append("")
+    with open(path, "w") as f:
+        f.write("\n".join(out))
+
+
+def c_arg(c):
+    if c in MAP_FIELD:
+        return "idmap_get(&g_ids.%s, rd_i())" % MAP_FIELD[c]
+    if c == "f":
+        return "rd_f()"
+    if c == "b":
+        return "(GLboolean)(rd_i() != 0)"
+    return "rd_i()"
+
+
+def gen_host_c(path):
+    out = ["/* Generated by tools/gen_glbridge.py - do not edit. */", ""]
+    out.append("enum GlBridgeOp {")
+    for i, n in enumerate(op_names()):
+        out.append("    GB_%s = %d," % (n, i + 1))
+    out.append("};")
+    out.append("")
+    out.append("/* Op number -> name, for the host's statistics. */")
+    out.append("static const char *const gb_op_names[] = {")
+    out.append("    \"?\",")
+    for n in op_names():
+        out.append("    \"%s\"," % n[3:])
+    out.append("};")
+    out.append("")
+    out.append("/* Executes a scalar GL call; returns 0 when op is not one of them. */")
+    out.append("static int gb_exec_simple(int op)")
+    out.append("{")
+    out.append("    switch (op) {")
+    for name, spec, _ in SIMPLE:
+        # Arguments are read left to right into locals: C leaves argument evaluation order open.
+        decls = " ".join("%s a%d = %s;" % (C_TYPES[c], i, c_arg(c)) for i, c in enumerate(spec))
+        args = ", ".join("a%d" % i for i in range(len(spec)))
+        out.append("    case GB_OP_%s: { %s %s(%s); return 1; }" % (name, decls, name, args))
+    out.append("    default: return 0;")
+    out.append("    }")
+    out.append("}")
+    with open(path, "w") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def gen_java(path):
+    out = ["// Generated by android/tools/gen_glbridge.py - do not edit.",
+           "package com.jamescrumble.shadowgun;", "",
+           "import android.opengl.GLES30;", "", "import java.nio.ByteBuffer;", "",
+           "final class GlOps {"]
+    for i, n in enumerate(op_names()):
+        out.append("    static final int %s = %d;" % (n, i + 1))
+    out.append("")
+    out.append("    /** Executes a scalar GL call; returns false when op is not one of them. */")
+    out.append("    static boolean exec(int op, ByteBuffer b, GlBridge.Ids ids) {")
+    out.append("        switch (op) {")
+    for name, spec, _ in SIMPLE:
+        args = ", ".join(java_arg(c) for c in spec)
+        out.append("            case OP_%s: GLES30.%s(%s); return true;" % (name, name, args))
+    out.append("            default: return false;")
+    out.append("        }")
+    out.append("    }")
+    out.append("}")
+    with open(path, "w") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def gen_py(path):
+    out = ["# Generated by android/tools/gen_glbridge.py - do not edit.", "OPS = {"]
+    for i, n in enumerate(op_names()):
+        out.append("    %d: %r," % (i + 1, n))
+    out.append("}")
+    with open(path, "w") as f:
+        f.write("\n".join(out) + "\n")
+
+
+if __name__ == "__main__":
+    os.makedirs("host/glbridge", exist_ok=True)
+    gen_c("port/src/gl_bridge_gen.inc")
+    gen_host_c("host/glbridge/gl_ops_gen.inc")
+    print("ops:", len(op_names()))
