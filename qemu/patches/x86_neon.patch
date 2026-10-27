@@ -1,0 +1,215 @@
+--- a/target/arm/tcg/vec_helper.c	2026-10-28 01:04:51.854262636 +0200
++++ b/target/arm/tcg/vec_helper.c	2026-10-28 01:05:10.783217315 +0200
+@@ -103,6 +103,133 @@
+ #endif
+ 
+ /*
++ * x86-64 build: single-precision Neon on SSE instead of softfloat.
++ *
++ * Neon computes under the "standard FPSCR" (round to nearest, flush to zero, default NaN). The host is left in its
++ * IEEE-default mode (nothing is switched), and a result is taken from the host only when it is the same one the
++ * standard FPSCR gives: every operand is zero, normal or infinite, and so is every result - not a NaN (x86 makes a
++ * different one), not a denormal (flushed on Arm), and not exactly the smallest normal number (Arm detects tininess
++ * before rounding, so it may have been rounded up from below). For multiply-accumulate the product is checked too.
++ * Anything else, any lane of the vector, makes the whole helper take the softfloat loop, which is the unchanged
++ * code. Only the cumulative exception flags are not produced (games do not read them). QEMU_STRICT_FP=1 turns the
++ * fast path off.
++ */
++#if defined(__x86_64__) && defined(__SSE2__)
++#include <emmintrin.h>
++
++static int neon_x86_on = -1;
++
++static inline bool neon_fast_x86(const float_status *s)
++{
++    if (unlikely(neon_x86_on < 0)) {
++        const char *v = getenv("QEMU_STRICT_FP");
++        neon_x86_on = !(v && *v && *v != '0');
++    }
++    return neon_x86_on &&
++           s->float_rounding_mode == float_round_nearest_even &&
++           s->flush_to_zero && s->flush_inputs_to_zero && s->default_nan_mode;
++}
++
++/* All-ones in the lanes that hold zero, a normal number or infinity. */
++static inline __m128i nx_plain(__m128i x)
++{
++    __m128i m = _mm_and_si128(x, _mm_set1_epi32(0x7fffffff));
++    __m128i zero = _mm_cmpeq_epi32(m, _mm_setzero_si128());
++    __m128i norm = _mm_and_si128(_mm_cmpgt_epi32(m, _mm_set1_epi32(0x007fffff)),
++                                 _mm_cmplt_epi32(m, _mm_set1_epi32(0x7f800001)));
++    return _mm_or_si128(zero, norm);
++}
++
++/* The same, but the smallest normal number is not accepted (for results). */
++static inline __m128i nx_settled(__m128i x)
++{
++    __m128i m = _mm_and_si128(x, _mm_set1_epi32(0x7fffffff));
++    __m128i zero = _mm_cmpeq_epi32(m, _mm_setzero_si128());
++    __m128i norm = _mm_and_si128(_mm_cmpgt_epi32(m, _mm_set1_epi32(0x00800000)),
++                                 _mm_cmplt_epi32(m, _mm_set1_epi32(0x7f800001)));
++    return _mm_or_si128(zero, norm);
++}
++
++static inline __m128i nx_load(const float32 *p, intptr_t left)
++{
++    return left >= 4 ? _mm_loadu_si128((const __m128i *)p) : _mm_loadl_epi64((const __m128i *)p);
++}
++
++static inline void nx_store(float32 *p, intptr_t left, __m128i v)
++{
++    if (left >= 4) {
++        _mm_storeu_si128((__m128i *)p, v);
++    } else {
++        _mm_storel_epi64((__m128i *)p, v);
++    }
++}
++
++enum { NX_ADD, NX_SUB, NX_MUL, NX_MLA, NX_MLS };
++
++/* One vector of up to four lanes: false means "take the softfloat path". */
++static inline __attribute__((always_inline)) bool
++nx_op(int kind, __m128i d, __m128i n, __m128i m, __m128i *out)
++{
++    __m128i ok = _mm_and_si128(nx_plain(n), nx_plain(m));
++    __m128 a = _mm_castsi128_ps(n), b = _mm_castsi128_ps(m), r;
++    switch (kind) {
++    case NX_ADD:
++        r = _mm_add_ps(a, b);
++        break;
++    case NX_SUB:
++        r = _mm_sub_ps(a, b);
++        break;
++    case NX_MUL:
++        r = _mm_mul_ps(a, b);
++        break;
++    default:
++        ok = _mm_and_si128(ok, nx_plain(d));
++        r = _mm_mul_ps(a, b);
++        __asm__("" : "+x"(r));                    /* keep the product a separate, rounded step */
++        ok = _mm_and_si128(ok, nx_settled(_mm_castps_si128(r)));
++        r = kind == NX_MLA ? _mm_add_ps(_mm_castsi128_ps(d), r) : _mm_sub_ps(_mm_castsi128_ps(d), r);
++        break;
++    }
++    __m128i ri = _mm_castps_si128(r);
++    ok = _mm_and_si128(ok, nx_settled(ri));
++    if (unlikely(_mm_movemask_epi8(ok) != 0xffff)) {
++        return false;
++    }
++    *out = ri;
++    return true;
++}
++
++/* d = n op m / d +-= n * m over a whole Neon register (8 or 16 bytes). False: nothing was written. */
++static inline bool nx_3op(int kind, float32 *d, const float32 *n, const float32 *m, intptr_t oprsz, bool by_elem,
++                          intptr_t idx)
++{
++    __m128i r0;
++    intptr_t cnt = oprsz / 4;
++    __m128i mm0 = by_elem ? _mm_set1_epi32((int)m[idx]) : nx_load(m, cnt);
++    if (!nx_op(kind, nx_load(d, cnt), nx_load(n, cnt), mm0, &r0)) {
++        return false;
++    }
++    nx_store(d, cnt, r0);
++    return true;
++}
++
++#define FAST_X86_3OP_S(NAME, KIND, SOFT)                                    \
++void HELPER(NAME)(void *vd, void *vn, void *vm,                             \
++                  float_status *stat, uint32_t desc)                        \
++{                                                                           \
++    intptr_t i, oprsz = simd_oprsz(desc);                                   \
++    float32 *d = vd, *n = vn, *m = vm;                                      \
++    if (!(oprsz <= 16 && neon_fast_x86(stat) &&                             \
++          nx_3op(KIND, d, n, m, oprsz, false, 0))) {                        \
++        for (i = 0; i < oprsz / 4; i++) {                                   \
++            d[i] = SOFT;                                                    \
++        }                                                                   \
++    }                                                                       \
++    clear_tail(d, oprsz, simd_maxsz(desc));                                 \
++}
++#endif
++
++/*
+  * Data for expanding active predicate bits to bytes, for byte elements.
+  *
+  *  for (i = 0; i < 256; ++i) {
+@@ -1535,6 +1662,8 @@
+ DO_3OP(gvec_fadd_h, float16_add, float16)
+ #if defined(__aarch64__)
+ FAST_3OP_S(gvec_fadd_s, "fadd %s0, %s1, %s2", float32_add(n[i], m[i], stat))
++#elif defined(__x86_64__) && defined(__SSE2__)
++FAST_X86_3OP_S(gvec_fadd_s, NX_ADD, float32_add(n[i], m[i], stat))
+ #else
+ DO_3OP(gvec_fadd_s, float32_add, float32)
+ #endif
+@@ -1545,6 +1674,8 @@
+ DO_3OP(gvec_fsub_h, float16_sub, float16)
+ #if defined(__aarch64__)
+ FAST_3OP_S(gvec_fsub_s, "fsub %s0, %s1, %s2", float32_sub(n[i], m[i], stat))
++#elif defined(__x86_64__) && defined(__SSE2__)
++FAST_X86_3OP_S(gvec_fsub_s, NX_SUB, float32_sub(n[i], m[i], stat))
+ #else
+ DO_3OP(gvec_fsub_s, float32_sub, float32)
+ #endif
+@@ -1555,6 +1686,8 @@
+ DO_3OP(gvec_fmul_h, float16_mul, float16)
+ #if defined(__aarch64__)
+ FAST_3OP_S(gvec_fmul_s, "fmul %s0, %s1, %s2", float32_mul(n[i], m[i], stat))
++#elif defined(__x86_64__) && defined(__SSE2__)
++FAST_X86_3OP_S(gvec_fmul_s, NX_MUL, float32_mul(n[i], m[i], stat))
+ #else
+ DO_3OP(gvec_fmul_s, float32_mul, float32)
+ #endif
+@@ -1728,6 +1861,8 @@
+ #if defined(__aarch64__)
+ FAST_3OP_S(gvec_fmla_nf_s, "fmul %s0, %s1, %s2\n\tfadd %s0, %s3, %s0",
+            float32_muladd_nf(d[i], n[i], m[i], stat))
++#elif defined(__x86_64__) && defined(__SSE2__)
++FAST_X86_3OP_S(gvec_fmla_nf_s, NX_MLA, float32_muladd_nf(d[i], n[i], m[i], stat))
+ #else
+ DO_MULADD(gvec_fmla_nf_s, float32_muladd_nf, float32)
+ #endif
+@@ -1736,6 +1871,8 @@
+ #if defined(__aarch64__)
+ FAST_3OP_S(gvec_fmls_nf_s, "fmul %s0, %s1, %s2\n\tfsub %s0, %s3, %s0",
+            float32_mulsub_nf(d[i], n[i], m[i], stat))
++#elif defined(__x86_64__) && defined(__SSE2__)
++FAST_X86_3OP_S(gvec_fmls_nf_s, NX_MLS, float32_mulsub_nf(d[i], n[i], m[i], stat))
+ #else
+ DO_MULADD(gvec_fmls_nf_s, float32_mulsub_nf, float32)
+ #endif
+@@ -1870,6 +2007,33 @@
+            float32_add(d[i + j], float32_mul(n[i + j], mm, stat), stat))
+ FAST_IDX_S(gvec_fmls_nf_idx_s, "fmul %s0, %s1, %s2\n\tfsub %s0, %s3, %s0",
+            float32_sub(d[i + j], float32_mul(n[i + j], mm, stat), stat))
++#elif defined(__x86_64__) && defined(__SSE2__)
++/* By-element forms: the scalar m[idx] of each 128-bit segment multiplies the whole register. */
++#define FAST_X86_IDX_S(NAME, KIND, SOFT)                                    \
++void HELPER(NAME)(void *vd, void *vn, void *vm,                             \
++                  float_status *stat, uint32_t desc)                        \
++{                                                                           \
++    intptr_t i, j, oprsz = simd_oprsz(desc);                                \
++    intptr_t segment = MIN(16, oprsz) / 4;                                  \
++    intptr_t idx = simd_data(desc);                                         \
++    float32 *d = vd, *n = vn, *m = vm;                                      \
++    if (!(oprsz <= 16 && neon_fast_x86(stat) &&                             \
++          nx_3op(KIND, d, n, m, oprsz, true, idx))) {                       \
++        for (i = 0; i < oprsz / 4; i += segment) {                          \
++            float32 mm = m[H4(i + idx)];                                    \
++            for (j = 0; j < segment; j++) {                                 \
++                d[i + j] = SOFT;                                            \
++            }                                                               \
++        }                                                                   \
++    }                                                                       \
++    clear_tail(d, oprsz, simd_maxsz(desc));                                 \
++}
++
++FAST_X86_IDX_S(gvec_fmul_idx_s, NX_MUL, float32_mul(n[i + j], mm, stat))
++FAST_X86_IDX_S(gvec_fmla_nf_idx_s, NX_MLA,
++               float32_add(d[i + j], float32_mul(n[i + j], mm, stat), stat))
++FAST_X86_IDX_S(gvec_fmls_nf_idx_s, NX_MLS,
++               float32_sub(d[i + j], float32_mul(n[i + j], mm, stat), stat))
+ #else
+ DO_FMUL_IDX(gvec_fmul_idx_s, nop, float32_mul, float32, H4)
+ DO_FMUL_IDX(gvec_fmla_nf_idx_s, float32_add, float32_mul, float32, H4)

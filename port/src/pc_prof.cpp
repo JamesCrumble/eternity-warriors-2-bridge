@@ -27,12 +27,16 @@
 namespace {
 
 constexpr uint32_t kRing = 1u << 12;            /* samples kept between two reports */
-constexpr long     kPeriodUs = 4000;            /* 250 Hz */
+long               g_period_us = 4000;          /* 250 Hz; EW2_PC_PROF_HZ changes it */
+long               g_slow_ms = 16;              /* EW2_PC_PROF_SLOW_MS: a frame this long or longer is "slow" */
+long               g_slow_max_ms = 0;           /* EW2_PC_PROF_SLOW_MAX_MS: ...but not longer than this (0: no limit) */
+int                g_slow_report = 300;         /* slow-frame samples collected before a pcslow report */
 constexpr int      kReportEverySamples = 1250;  /* ~5 s */
 constexpr int      kStackWords = 96;            /* stack words kept per sample, for the caller chain */
 constexpr int      kChain = 8;
 
 struct Sample {
+    uint64_t ts;                    /* CLOCK_MONOTONIC ns, to tell which frame the sample belongs to */
     uint32_t pc, lr, sp, r7;
     uint32_t stack[kStackWords];
 };
@@ -41,7 +45,15 @@ Sample            g_ring[kRing];
 volatile uint32_t g_head;
 pthread_t         g_target;
 bool              g_started;
+bool              g_enabled;
 std::string       g_want;               /* EW3_PC_PROF_THREAD: sample the busiest thread whose name contains this */
+struct Mark {
+    long frame;
+    uint64_t ts;
+};
+constexpr uint32_t kMarks = 1u << 10;
+Mark              g_marks[kMarks];      /* start of every frame, written by the engine thread */
+volatile uint32_t g_mark_head;
 volatile int      g_tid;                /* its tid once found; 0 = sample the engine thread through g_target */
 
 /* Runs on the engine thread: copies registers and the top of the stack, nothing else. The analysis is done by
@@ -50,6 +62,9 @@ void on_prof(int, siginfo_t *, void *ctx)
 {
     const ucontext_t *uc = (const ucontext_t *)ctx;
     Sample &s = g_ring[g_head & (kRing - 1)];
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    s.ts = (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
     s.pc = (uint32_t)uc->uc_mcontext.arm_pc;
     s.lr = (uint32_t)uc->uc_mcontext.arm_lr;
     s.sp = (uint32_t)uc->uc_mcontext.arm_sp;
@@ -150,14 +165,15 @@ void print_blocks(const char *tag, const BlockMap &by_mod, uint32_t n, bool perc
     }
 }
 
-void report(uint32_t first, uint32_t last)
+void report_samples(const std::vector<const Sample *> &samples, const char *tag, const char *extra)
 {
     BlockMap leaf, incl;
     std::map<std::string, uint32_t> totals;
     std::map<std::string, uint32_t> waits;      /* "nr=240 libunity.so+0x1c3700" -> samples */
     uint32_t n = 0;
-    for (uint32_t i = first; i != last; i++, n++) {
-        const Sample &s = g_ring[i & (kRing - 1)];
+    for (const Sample *sp : samples) {
+        const Sample &s = *sp;
+        n++;
         std::string mod;
         uint32_t off;
         locate(s.pc, mod, off);
@@ -195,25 +211,91 @@ void report(uint32_t first, uint32_t last)
     std::sort(order.rbegin(), order.rend());
 
     char line[600];
-    int len = snprintf(line, sizeof(line), "pcprof: %u samples of the engine thread:", n);
+    int len = snprintf(line, sizeof(line), "%s: %u samples of the engine thread%s:", tag, n, extra);
     for (auto &o : order)
         len += snprintf(line + len, sizeof(line) - len, " %s %.1f%%", o.second.c_str(), 100.0 * o.first / n);
     trace("%s", line);
 
-    print_blocks("pcprof", leaf, n, true);
-    print_blocks("pcprof_incl", incl, n, false);
+    print_blocks(tag, leaf, n, true);
+    print_blocks((std::string(tag) + "_incl").c_str(), incl, n, false);
 
     std::vector<std::pair<uint32_t, std::string>> w;
     for (auto &x : waits)
         w.push_back({x.second, x.first});
     std::sort(w.rbegin(), w.rend());
-    std::string out = "pcprof_wait:";
+    std::string out = std::string(tag) + "_wait:";
     char tok[200];
     for (size_t i = 0; i < w.size() && i < 14; i++) {
         snprintf(tok, sizeof(tok), " [%s]=%u", w[i].second.c_str(), w[i].first);
         out += tok;
     }
     trace("%s", out.c_str());
+}
+
+void report(uint32_t first, uint32_t last)
+{
+    std::vector<const Sample *> v;
+    for (uint32_t i = first; i != last; i++)
+        v.push_back(&g_ring[i & (kRing - 1)]);
+    report_samples(v, "pcprof", "");
+}
+
+/*
+ * Samples of the slow frames only. The ring is walked a little behind the engine: a sample can be classified once
+ * the end of its frame (the next frame's mark) is known. Slow samples are copied and reported together, so the
+ * 20-30 ms of a monster spawn - a few samples per spawn - add up over a session into a readable histogram.
+ */
+std::vector<Sample> g_slow;
+uint32_t g_sc_idx;          /* next ring sample to classify */
+uint32_t g_mk_idx;          /* start mark of the next frame to judge */
+unsigned long g_slow_frames, g_frames_judged;
+unsigned long long g_slow_excess_ns;
+
+void classify(uint32_t head)
+{
+    if (head - g_sc_idx >= kRing - 64)
+        g_sc_idx = head - (kRing - 64);                 /* fell behind: drop the oldest */
+    const uint64_t slow_ns = (uint64_t)g_slow_ms * 1000000ull;
+    for (;;) {
+        const uint32_t mh = g_mark_head;
+        if (g_mk_idx + 1 >= mh)
+            break;
+        if (mh - g_mk_idx >= kMarks - 8)
+            g_mk_idx = mh - 2;
+        const Mark &a = g_marks[g_mk_idx & (kMarks - 1)];
+        const Mark &b = g_marks[(g_mk_idx + 1) & (kMarks - 1)];
+        /* Judge a frame only when a sample newer than its end exists: the signal handler runs asynchronously, and
+         * until then the last samples of the frame may not be in the ring yet. */
+        if (head == 0 || g_ring[(head - 1) & (kRing - 1)].ts < b.ts)
+            break;
+        const bool slow = b.ts - a.ts >= slow_ns && (g_slow_max_ms == 0 || b.ts - a.ts <= (uint64_t)g_slow_max_ms * 1000000ull);
+        while (g_sc_idx != head) {
+            const Sample &s = g_ring[g_sc_idx & (kRing - 1)];
+            if (s.ts >= b.ts)
+                break;                                   /* belongs to a later frame */
+            if (s.ts >= a.ts && slow)
+                g_slow.push_back(s);
+            g_sc_idx++;
+        }
+        g_frames_judged++;
+        if (slow) {
+            g_slow_frames++;
+            g_slow_excess_ns += (b.ts - a.ts);
+        }
+        g_mk_idx++;
+    }
+    if ((int)g_slow.size() >= g_slow_report) {
+        std::vector<const Sample *> v;
+        for (const Sample &s : g_slow)
+            v.push_back(&s);
+        char extra[160];
+        snprintf(extra, sizeof(extra), ", all from the %lu frames of %ld..%ld ms among %lu (%.1f s in them)", g_slow_frames,
+                 g_slow_ms, g_slow_max_ms, g_frames_judged, (double)g_slow_excess_ns / 1e9);
+        report_samples(v, "pcslow", extra);
+        g_slow.clear();
+        g_slow_frames = g_frames_judged = 0;
+        g_slow_excess_ns = 0;
+    }
 }
 
 /* The busiest thread (user+system CPU time) of this process whose name contains g_want; 0 if there is none. */
@@ -262,12 +344,12 @@ void *sampler(void *)
     uint32_t reported = g_head;
     long since_lookup = 0;
     for (;;) {
-        struct timespec ts = { 0, kPeriodUs * 1000 };
+        struct timespec ts = { 0, g_period_us * 1000 };
         nanosleep(&ts, NULL);
         if (!g_want.empty()) {
             /* Look again about every 5 s until a thread is chosen: workers are created late and CPU time is only
              * telling once they have run for a while. Sampling starts only then. */
-            if (!g_tid && ++since_lookup >= 5000000L / kPeriodUs) {
+            if (!g_tid && ++since_lookup >= 5000000L / g_period_us) {
                 since_lookup = 0;
                 g_tid = find_named_thread();
                 if (g_tid)
@@ -280,6 +362,7 @@ void *sampler(void *)
             pthread_kill(g_target, SIGPROF);
         }
         uint32_t head = g_head;
+        classify(head);
         if (head - reported >= (uint32_t)kReportEverySamples && head - reported < kRing - 64) {
             report(reported, head);
             reported = g_head;
@@ -294,11 +377,27 @@ void *sampler(void *)
 
 extern "C" void pc_prof_tick(long frame)
 {
-    if (g_started || frame < 30)
+    if (g_started) {
+        if (g_enabled) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            Mark &m = g_marks[g_mark_head & (kMarks - 1)];
+            m.frame = frame;
+            m.ts = (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
+            g_mark_head = g_mark_head + 1;
+        }
+        return;
+    }
+    if (frame < 30)
         return;
     g_started = true;
     if (!port_getenv_long("PC_PROF", 0))
         return;
+    g_enabled = true;
+    g_period_us = 1000000L / std::max(20L, std::min(2000L, port_getenv_long("PC_PROF_HZ", 250)));
+    g_slow_ms = port_getenv_long("PC_PROF_SLOW_MS", port_getenv_long("SLOW_FRAME_MS", 16));
+    g_slow_max_ms = port_getenv_long("PC_PROF_SLOW_MAX_MS", 0);
+    g_slow_report = (int)port_getenv_long("PC_PROF_SLOW_REPORT", 300);
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = on_prof;
@@ -312,6 +411,6 @@ extern "C" void pc_prof_tick(long frame)
     pthread_t t;
     if (pthread_create(&t, NULL, sampler, NULL) == 0) {
         pthread_detach(t);
-        trace("pcprof: sampling the engine thread at %ld Hz, with caller chains", 1000000L / kPeriodUs);
+        trace("pcprof: sampling the engine thread at %ld Hz, with caller chains", 1000000L / g_period_us);
     }
 }

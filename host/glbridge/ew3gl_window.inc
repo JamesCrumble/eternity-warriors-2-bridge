@@ -88,6 +88,7 @@ static void window_open(void)
     /* The GL functions are linked by name: a context that is not current here shows as NULL strings. */
     if (!glGetString(GL_VERSION))
         gfatal("the GLES context is not current (glGetString(GL_VERSION) is NULL): %s", SDL_GetError());
+    blobcache_init();
     if (SDL_GL_SetSwapInterval(g_cfg.vsync ? 1 : 0) != 0 && g_cfg.vsync)
         glog("vsync unavailable: %s", SDL_GetError());
 

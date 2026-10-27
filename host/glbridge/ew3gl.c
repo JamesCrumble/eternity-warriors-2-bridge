@@ -38,6 +38,7 @@
 #include "gl_ops_gen.inc"
 #include "ew3gl_hud.inc"
 #include "ew3gl_shot.inc"
+#include "ew3gl_blobcache.inc"
 #include "ew3gl_window.inc"
 #include "ew3gl_input.inc"
 #include "ew3gl_objects.inc"
@@ -107,7 +108,7 @@ static void run(void)
         if (g_underrun)
             GLOG_LIMITED(g_exec_errors, 20, "op %s (%u): payload shorter than its fields (%u bytes)",
                          op_name((int)op), op, len);
-        if (g_cfg.check_errors) {
+        if (g_cfg.check_errors && (g_cfg.check_every <= 1 || g_swaps % g_cfg.check_every == 0)) {
             GLenum e = glGetError();
             if (e != GL_NO_ERROR)
                 GLOG_LIMITED(g_gl_errors, 200, "glGetError 0x%04x after %s", e, op_name((int)op));

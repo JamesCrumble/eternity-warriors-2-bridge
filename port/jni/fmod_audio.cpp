@@ -171,10 +171,14 @@ void *audio_main(void *)
  * calls restartFMODAudioDevice(). Unity 5's wrapper did this itself; for a 4.x
  * game the port has to, or FMOD mixes into nothing and the game is silent.
  */
-static void device_start(JNIEnv *env)
+/*
+ * Unity 4.2 initialises FMOD inside unityAndroidInit, and FMOD's Android output
+ * needs the JNI environment that fmodInitJni stores - without it getNumDrivers
+ * fails ("FMOD failed to get number of drivers") and the game stays silent.
+ * So the device is created and fmodInitJni called before unityAndroidInit.
+ */
+static void device_prepare(JNIEnv *env)
 {
-    if (g_run.exchange(true))
-        return;
     if (!g_device)
         g_device = (jobject)dyn_new("org/fmod/FMODAudioDevice");
     /* FMOD's Java class calls this once before the first fmodGetInfo. */
@@ -184,6 +188,13 @@ static void device_start(JNIEnv *env)
         inited = true;
         init_jni(env, g_device);
     }
+}
+
+static void device_start(JNIEnv *env)
+{
+    if (g_run.exchange(true))
+        return;
+    device_prepare(env);
     pthread_create(&g_thread, NULL, audio_main, NULL);
     trace("[audio] fmod: output device started");
 }
@@ -195,6 +206,7 @@ static void device_stop(void)
 }
 
 void fmod_audio_start(JNIEnv *env) { device_start(env); }
+void fmod_audio_prepare(JNIEnv *env) { device_prepare(env); }
 
 void fmod_audio_register(JNIEnv *env)
 {

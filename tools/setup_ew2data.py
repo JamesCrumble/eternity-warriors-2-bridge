@@ -14,8 +14,8 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARENT = os.path.dirname(ROOT)
 
-APK_SRC = os.path.join(PARENT, "com.glu.ewarriors2-435.apk")
-OBB_SRC = os.path.join(PARENT, "cache_extracted", "com.glu.ewarriors2", "main.431.com.glu.ewarriors2.obb")
+APK_SRC = os.path.join(ROOT, "gamebin", "com.glu.ewarriors2-435.apk")
+OBB_SRC = os.path.join(ROOT, "gamebin", "main.431.com.glu.ewarriors2.obb")
 PC_SAVES_SRC = os.path.join(PARENT, "Eternity_Warriors_2_PC", "Saves")
 PC_CHEAT_SAVES_SRC = os.path.join(PARENT, "Eternity_Warriors_2_PC", "Optional_Cheat_Save")
 

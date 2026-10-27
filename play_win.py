@@ -106,67 +106,27 @@ def sync_saves_before_launch():
 
 
 def ensure_build(use_wsl=False):
-    zig = os.path.join(ROOT, "third_party", "zig", "zig.exe")
-
+    """Checks the prebuilt pieces; they are built from WSL (no zig): tools/build_host_win.sh, tools/build_port_wsl.sh."""
     ew2gl_exe = os.path.join(ROOT, "host", "build-win", "ew2gl.exe")
-    gl_srcs = glob.glob(os.path.join(ROOT, "host", "glbridge", "*.c")) + glob.glob(
-        os.path.join(ROOT, "host", "glbridge", "*.inc")
-    )
-    if not os.path.exists(ew2gl_exe) or any(
-        os.path.getmtime(s) > os.path.getmtime(ew2gl_exe) for s in gl_srcs
-    ):
-        print("[launcher] building host/build-win/ew2gl.exe...")
-        os.makedirs(os.path.join(ROOT, "host", "build-win"), exist_ok=True)
-        subprocess.run(
-            [
-                zig,
-                "cc",
-                "-target",
-                "x86_64-windows-gnu",
-                "-O3",
-                "-DSDL_MAIN_HANDLED",
-                "-Ihost/glbridge",
-                "-Ithird_party/khronos/include",
-                "-Ithird_party/sdl2-win/include",
-                "-Ithird_party/sdl2-win/include/SDL2",
-                "host/glbridge/ew3gl.c",
-                "third_party/sdl2-win/lib/SDL2.lib",
-                "host/build-win/libGLESv2.lib",
-                "-lws2_32",
-                "-o",
-                ew2gl_exe,
-            ],
-            check=True,
-        )
+    ew2_bin = os.path.join(ROOT, "port", "build", "ew2")
+    if not os.path.exists(ew2gl_exe):
+        raise SystemExit("host/build-win/ew2gl.exe is missing: run tools/build_host_win.sh in WSL")
+    if not os.path.exists(ew2_bin):
+        raise SystemExit("port/build/ew2 is missing: run tools/build_port_wsl.sh in WSL")
 
     wsl_runner_src = os.path.join(ROOT, "third_party", "qemu-guest", "wsl_runner.c")
     wsl_runner_bin = os.path.join(ROOT, "third_party", "qemu-guest", "wsl_runner")
-    if os.path.exists(wsl_runner_src) and (
-        not os.path.exists(wsl_runner_bin)
-        or os.path.getmtime(wsl_runner_src) > os.path.getmtime(wsl_runner_bin)
+    cc = shutil.which("gcc")
+    if cc and os.path.exists(wsl_runner_src) and (
+        not os.path.exists(wsl_runner_bin) or os.path.getmtime(wsl_runner_src) > os.path.getmtime(wsl_runner_bin)
     ):
         print("[launcher] building third_party/qemu-guest/wsl_runner...")
-        subprocess.run(
-            [
-                zig,
-                "cc",
-                "-target",
-                "x86_64-linux-musl",
-                "-static",
-                "-O2",
-                wsl_runner_src,
-                "-o",
-                wsl_runner_bin,
-                "-lpthread",
-            ],
-            check=True,
-        )
+        subprocess.run([cc, "-static", "-O2", wsl_runner_src, "-o", wsl_runner_bin, "-lpthread"], check=True)
 
-    from tools.build_port import build_all
     from tools.optimize_obb import optimize_obb
 
     optimize_obb()
-    port_rebuilt = build_all()
+    port_rebuilt = False
 
     if use_wsl:
         return
@@ -197,7 +157,19 @@ class EW2HTTPHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def _offline(self):
+        # Glu's PvP/rank servers are gone: answer 503 ("server down") instead of a body the game cannot decode.
+        host = self.headers.get("Host", "")
+        if "ew2rank" in host or "bjapp-1.aws.glu.com" in host or self.path.startswith("/v1/private/pvp"):
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        return False
+
     def do_GET(self):
+        if self._offline():
+            return
         if "/version" in self.path:
             body = b"Version\nskip\nskip\nfalse\nAAAAAAAAAA\n0\n"
             self.send_response(200)
@@ -217,6 +189,8 @@ class EW2HTTPHandler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", "0") or "0")
         if n > 0:
             self.rfile.read(n)
+        if self._offline():
+            return
         body = b'{"status":"ok"}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -492,11 +466,15 @@ def audio_worker():
 
 def cleanup_old_session(use_wsl=False):
     for proc_name in ("ew2gl.exe", "qemu-system-arm.exe"):
-        subprocess.run(
-            ["taskkill", "/F", "/IM", proc_name],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", proc_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            # taskkill is not on PATH (e.g. python launched from inside WSL)
+            break
     if use_wsl:
         try:
             subprocess.run(
@@ -566,8 +544,37 @@ def start_wsl_guest(w, h, play_log):
     )
 
 
+def delegate_to_wsl(res):
+    """The maintained launcher is play_wsl.sh (qemu-arm in WSL, GL on the Windows GPU, sound through WSLg).
+
+    Run from WSL/Linux this replaces the process with it; run from Windows it goes through wsl.exe. The code
+    below this function is the older all-Windows path (qemu-system-arm VM): it needs third_party/qemu-guest/
+    {vmlinuz, ew2_initrd.cpio} and an xPack QEMU that are not part of the repository, and is used only with
+    EW2_LEGACY_VM=1. Returns only if there is nothing to delegate to.
+    """
+    script = os.path.join(ROOT, "play_wsl.sh")
+    if os.environ.get("EW2_LEGACY_VM", "") == "1" or not os.path.exists(script):
+        return
+    if os.name != "nt":
+        os.execv("/bin/bash", ["bash", script, res])
+    wsl = shutil.which("wsl.exe") or shutil.which("wsl")
+    if not wsl:
+        print("[launcher] wsl.exe not found: install WSL2 (see README.md) or set EW2_LEGACY_VM=1")
+        sys.exit(1)
+    # Tell WSL which of our variables to pass through (EW2_*, EW3_*, LOADER_TRACE, QEMU_*).
+    names = [k for k in os.environ if k.startswith(("EW2_", "EW3_", "QEMU_")) or k == "LOADER_TRACE"]
+    env = dict(os.environ)
+    env["WSLENV"] = ":".join(filter(None, [os.environ.get("WSLENV", "")] + names))
+    distro = os.environ.get("EW2_WSL_DISTRO", "").strip()
+    cmd = [wsl] + (["-d", distro] if distro else [])
+    cmd += ["-e", "bash", "-lc", "cd \"$(wslpath -u '%s')\" && ./play_wsl.sh %s" % (ROOT, res)]
+    print("[launcher] starting play_wsl.sh through WSL...")
+    sys.exit(subprocess.call(cmd, env=env))
+
+
 def main():
     res = sys.argv[1] if len(sys.argv) > 1 else "1280x720"
+    delegate_to_wsl(res)
     w, h = res.split("x")
     sync_saves_before_launch()
     use_wsl = has_wsl_qemu_arm()

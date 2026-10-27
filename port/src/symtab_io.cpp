@@ -204,6 +204,35 @@ static const char kSysFonts[] = "/system/fonts/";
  */
 static const char kGameFont[] = "assets/published/fonts/EurostileLTStd.ttf";
 
+/*
+ * /proc/cpuinfo under qemu-user is the host's (x86). FMOD reads it to pick its
+ * ARM mixer ("FMOD failed to get number of drivers ... requires hardware
+ * support") and Mono reads it for Thumb ("thumb_supported" assertion), so both
+ * get a Snapdragon-800-like ARMv7 file instead. Written once, to the temp dir.
+ */
+static const char *fake_cpuinfo_path()
+{
+    static char path[128];
+    static bool done;
+    if (done)
+        return path;
+    done = true;
+    snprintf(path, sizeof(path), "/tmp/ew2_cpuinfo.%d", (int)getuid());
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        snprintf(path, sizeof(path), "/proc/cpuinfo");
+        return path;
+    }
+    fputs("Processor\t: ARMv7 Processor rev 0 (v7l)\n", f);
+    for (int i = 0; i < 4; i++)
+        fprintf(f, "processor\t: %d\nBogoMIPS\t: 38.40\n\n", i);
+    fputs("Features\t: swp half thumb fastmult vfp edsp neon vfpv3 tls vfpv4 idiva idivt\n"
+          "CPU implementer\t: 0x51\nCPU architecture: 7\nCPU variant\t: 0x2\nCPU part\t: 0x06f\nCPU revision\t: 0\n\n"
+          "Hardware\t: Qualcomm MSM 8974 HAMMERHEAD (Flattened Device Tree)\nRevision\t: 000b\nSerial\t\t: 0000000000000000\n", f);
+    fclose(f);
+    return path;
+}
+
 const char *fix_path(const char *orig, char *buf, size_t bufsz)
 {
     /*
@@ -213,6 +242,8 @@ const char *fix_path(const char *orig, char *buf, size_t bufsz)
      * mangle this port's own package directory, which contains "shadowgun/".
      */
     (void)buf; (void)bufsz;
+    if (orig && strcmp(orig, "/proc/cpuinfo") == 0)
+        return fake_cpuinfo_path();
     return orig;
 #if 0
     if (!orig || !*orig)

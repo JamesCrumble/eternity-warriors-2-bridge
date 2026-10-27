@@ -87,6 +87,11 @@ static uint64_t g_write_ns, g_sync_ns, g_last_swap_ns;
 static inline uint64_t now_ns()
 {
     uint64_t v = 0;
+    if (!port_cntvct_usable()) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    }
     __asm__ __volatile__("mrrc p15, 1, %Q0, %R0, c14" : "=r"(v));
     return v << 4;
 }

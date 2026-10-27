@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
 #include <vector>
@@ -48,6 +49,11 @@ extern "C" uint64_t sysprof_now(void)
     if (__builtin_expect(!enabled(), 1))
         return 0;
     uint64_t v = 0;
+    if (!port_cntvct_usable()) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    }
     __asm__ __volatile__("mrrc p15, 1, %Q0, %R0, c14" : "=r"(v));
     return v << 4;
 }

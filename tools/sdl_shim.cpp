@@ -18,6 +18,12 @@ static uint64_t g_start_ns = 0;
 
 static uint64_t monotonic_ns(void) {
     uint64_t v = 0;
+    const char *no = getenv("EW2_NO_CNTVCT");   /* plain qemu-arm cannot read CNTVCT */
+    if (no && *no && *no != '0') {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    }
     __asm__ __volatile__("mrrc p15, 1, %Q0, %R0, c14" : "=r"(v));
     return v << 4;
 }

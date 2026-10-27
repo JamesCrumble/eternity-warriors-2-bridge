@@ -9,7 +9,6 @@ host/glbridge/*.obj
 host/glbridge/*.exp
 
 # Local toolchains & dependencies
-third_party/zig/
 third_party/sysroot-armhf/
 third_party/sdl2-win/
 third_party/angle/
@@ -35,3 +34,10 @@ ctl/*.png
 ctl/shot
 *.log
 __pycache__/
+
+# WSL launcher outputs and local game files
+build/
+gamebin/
+ctl/status.json
+Saves/UnityCache/
+logs_saved/

@@ -125,6 +125,7 @@ struct config {
     int vsync;                /* EW3_GL_VSYNC, default 1 */
     int fullscreen;           /* EW3_GL_FULLSCREEN */
     int report_s;             /* EW3_GL_REPORT: seconds between stats lines, 0 = off */
+    int check_every;          /* EW2_GL_CHECK_EVERY=N: run the GL_CHECK only during every Nth frame (default 1: all) */
     int check_errors;         /* EW3_GL_CHECK: glGetError after every op (slow; for debugging) */
 };
 static struct config g_cfg;
@@ -141,6 +142,7 @@ static void config_load(void)
     g_cfg.fullscreen = (int)cfg_long("GL_FULLSCREEN", 0);
     g_cfg.report_s = (int)cfg_long("GL_REPORT", 5);
     g_cfg.check_errors = (int)cfg_long("GL_CHECK", 0);
+    g_cfg.check_every = (int)cfg_long("GL_CHECK_EVERY", 1);
     if (g_cfg.width < 320 || g_cfg.width > 4096)
         g_cfg.width = 1280;
     if (g_cfg.height < 240 || g_cfg.height > 4096)

@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,21 +32,15 @@ def cpio_entry(f_out, name, data=b"", mode=0o100755):
 
 
 def main():
-    subprocess.run(
-        [
-            r"third_party\zig\zig.exe",
-            "cc",
-            "-target",
-            "arm-linux-musleabihf",
-            "-static",
-            "-O3",
-            "third_party/qemu-guest/runner.c",
-            "-o",
-            "third_party/qemu-guest/init",
-            "-lpthread",
-        ],
-        check=True,
-    )
+    # init is a static ARM binary: arm-linux-gnueabihf-gcc from WSL (`sudo apt install gcc-arm-linux-gnueabihf`)
+    cc = shutil.which("arm-linux-gnueabihf-gcc")
+    if cc:
+        subprocess.run(
+            [cc, "-static", "-O2", "third_party/qemu-guest/runner.c", "-o", "third_party/qemu-guest/init", "-lpthread"],
+            check=True,
+        )
+    elif not os.path.exists("third_party/qemu-guest/init"):
+        raise SystemExit("third_party/qemu-guest/init is missing and arm-linux-gnueabihf-gcc is not installed")
 
     out_path = "third_party/qemu-guest/ew2_initrd.cpio"
     dirs_added = set()

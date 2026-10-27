@@ -15,8 +15,12 @@
 extern "C" {
 #endif
 
-/* Prints "TRACE: <msg>" to stderr, unbuffered, when LOADER_TRACE is set. */
+/* Queues "TRACE: <msg>" for stderr (written by a background thread) when LOADER_TRACE is set. EW2_TRACE_SYNC=1 writes inline. */
 void trace(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/* Writes out everything trace() has queued (it is buffered; see trace.cpp). Call before dying. */
+void trace_flush(void);
+void trace_flush_crash(void);   /* signal-handler variant: never blocks */
 
 /* Always printed, tracing on or off: the user needs to see why it refused. */
 void fatal(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

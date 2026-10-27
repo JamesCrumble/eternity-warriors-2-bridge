@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "fps_unlock.h"
+#include "find_cache.h"
+#include "icall_prof.h"
 #include "platform.h"
 #include "port_env.h"
 #include "trace.h"
@@ -148,7 +150,7 @@ static ABI_ATTR void add_icall_hook(const char *name, void *fn)
     } else if (name && !strcmp(name, "UnityEngine.Debug::Internal_Log") && !port_getenv_long("UNITY_LOG", 0)) {
         fn = (void *)internal_log_noop;
     }
-    g_real_add_icall(name, fn);
+    g_real_add_icall(name, icall_prof_wrap(name, find_cache_wrap(name, fn)));
 }
 
 extern "C" void *fps_unlock_hook_symbol(const char *name, void *sym)

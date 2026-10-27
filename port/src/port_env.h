@@ -47,6 +47,10 @@ long port_getenv_long(const char *name, long fallback);
  * do not keep it. */
 const char *port_env_name(const char *name);
 
+/* 0 when EW2_NO_CNTVCT is set: the CNTVCT/CNTFRQ coprocessor reads SIGILL under
+ * qemu-user (plain qemu-arm), they only exist in qemu-system-arm guests. */
+int port_cntvct_usable(void);
+
 #ifdef __cplusplus
 }
 #endif

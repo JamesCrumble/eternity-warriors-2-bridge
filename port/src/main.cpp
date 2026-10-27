@@ -43,6 +43,8 @@
 #include "app_exit.h"
 #include "crash.h"
 #include "fps_unlock.h"
+#include "find_cache.h"
+#include "icall_prof.h"
 #include "fix_path.h"
 #include "gl_bridge.h"
 #include "port_env.h"
@@ -62,6 +64,7 @@ extern "C" void android_egl_set_swap_hook(void (*hook)(long frame));
 extern "C" void *eglGetDisplay(void *display_id);
 extern "C" unsigned int eglSwapBuffers(void *dpy, void *surface);
 void fmod_audio_start(JNIEnv *env);
+void fmod_audio_prepare(JNIEnv *env);
 
 static const char *kNativeLibDir = "lib/armeabi-v7a";
 
@@ -338,7 +341,9 @@ extern "C" int so_after_relocate(so_module *mod)
              *    all JobScheduler futex syscalls while keeping UnityPreload and
              *    FMOD audio on separate vCPUs.
              */
-            if (port_getenv_long("JOB_THREADS", 0) == 0) {
+            /* Off only with EW2_JOB_THREADS=0. Under qemu-user on a multi-core host the workers do run in parallel
+             * (about 10% off a crowded battle frame); the inline mode was for the qemu-system VM. */
+            if (port_getenv_long("JOB_THREADS", 1) == 0) {
                 uintptr_t js = mod->text_base + 0x35ba00;
                 if (*(uint32_t *)js == 0xe2451001u) { /* sub r1, r5, #1 */
                     *(volatile uint32_t *)js = 0xe3a01000u; /* mov r1, #0 */
@@ -385,7 +390,7 @@ extern "C" int so_after_relocate(so_module *mod)
              */
             {
                 uintptr_t fn = mod->text_base + 0x2bb248;
-                if (*(uint32_t *)fn == 0xe52de004u && *(uint32_t *)(fn + 4) == 0xe24dd014u) {
+                if (port_cntvct_usable() && *(uint32_t *)fn == 0xe52de004u && *(uint32_t *)(fn + 4) == 0xe24dd014u) {
                     static const uint32_t kFastTimerNs[] = {
                         0xec510f1eu, /* mrrc p15, 1, r0, r1, c14 */
                         0xe1a01201u, /* lsl  r1, r1, #4          */
@@ -759,6 +764,8 @@ static int port_main(int argc, char **argv)
         eglSwapBuffers(eglGetDisplay(NULL), (void *)(uintptr_t)0xE6157FAC);
     gl_bridge_profile_step(0);
 
+    if (port_getenv_long("FMOD_DEVICE", 1))
+        fmod_audio_prepare(env);
     if (unityAndroidInit) {
         trace("-> unityAndroidInit(assets/bin/, %s)", lib_dir);
         jboolean ok = unityAndroidInit(env, player, env->NewStringUTF("assets/bin/"), env->NewStringUTF(lib_dir));
@@ -798,6 +805,8 @@ static int port_main(int argc, char **argv)
             goto done;
         unity_java_frame(env, frames);
         fps_unlock_tick(frames);
+        find_cache_tick(frames);
+        icall_prof_tick(frames);
         sysprof_tick(frames);
         pc_prof_tick(frames);
 

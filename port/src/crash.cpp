@@ -19,6 +19,7 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 #include "crash.h"
+#include "trace.h"
 #include "unwind_arm.h"
 
 #include <fcntl.h>
@@ -448,6 +449,7 @@ static void on_fault(int sig, siginfo_t *si, void *ucontext)
             close(fd);
         }
     }
+    trace_flush_crash();   /* queued TRACE lines first, so the log reads in order */
     put("\nFATAL: [tid ");
     put_hex((uintptr_t)syscall(SYS_gettid));
     put("] ");

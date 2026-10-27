@@ -71,3 +71,11 @@ extern "C" long port_getenv_long(const char *name, long fallback)
         return fallback;
     return parsed;
 }
+
+extern "C" int port_cntvct_usable(void)
+{
+    static int v = -1;
+    if (v < 0)
+        v = port_getenv_bool("NO_CNTVCT", 0) ? 0 : 1;
+    return v;
+}

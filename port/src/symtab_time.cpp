@@ -58,6 +58,7 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "port_env.h"
 #include "syscall_prof.h"
 
 #include "so_util.h"
@@ -177,6 +178,8 @@ static bool clock_measures_elapsed_time(int clk_id)
 static inline uint32_t arm_cntfrq(void)
 {
     uint32_t v = 0;
+    if (!port_cntvct_usable())
+        return 0;
     __asm__ __volatile__("mrc p15, 0, %0, c14, c0, 0" : "=r"(v));
     return v;
 }
@@ -184,6 +187,8 @@ static inline uint32_t arm_cntfrq(void)
 static inline uint64_t arm_cntvct(void)
 {
     uint64_t v = 0;
+    if (!port_cntvct_usable())
+        return 0;
     __asm__ __volatile__("mrrc p15, 1, %Q0, %R0, c14" : "=r"(v));
     return v;
 }
