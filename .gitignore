@@ -1,6 +1,7 @@
 # Build outputs
 port/build/
 host/build-win/
+host/build-native/
 host/glbridge/*.exe
 host/glbridge/*.dll
 host/glbridge/*.pdb

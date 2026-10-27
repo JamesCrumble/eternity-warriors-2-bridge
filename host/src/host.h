@@ -1,5 +1,5 @@
 /*
- * ew3host: shared declarations of the C side.
+ * ew2host: shared declarations of the C side.
  *
  * Module map:
  *   cpu.cpp     dynarmic binding (the only C++)
