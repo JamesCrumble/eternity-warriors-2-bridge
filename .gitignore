@@ -9,19 +9,20 @@ host/glbridge/*.lib
 host/glbridge/*.obj
 host/glbridge/*.exp
 
-# Local toolchains & dependencies
-third_party/sysroot-armhf/
-third_party/sdl2-win/
-third_party/angle/
-third_party/khronos/
-third_party/qemu/
-third_party/wsl-distro/
+# Local toolchains & dependencies: a local copy takes precedence, by default they come from ../__shared-third-party__
+/third_party/angle/
+/third_party/khronos/
+/third_party/sdl2-win/
+/third_party/qemu/
+/third_party/sysroot-armhf/
+/third_party/wsl-distro/
 third_party/qemu-guest/wsl_runner
 third_party/qemu-guest/start_wsl.sh
 third_party/qemu-guest/init
 third_party/qemu-guest/vmlinuz
 third_party/qemu-guest/bzImage-arm
 third_party/qemu-guest/ew2_initrd.cpio
+# SDL shim built by tools/build_port_wsl.sh (the project's own build output, not the shared SDL)
 sdl-arm/
 
 # Extracted game data (APK / OBB / native libs)

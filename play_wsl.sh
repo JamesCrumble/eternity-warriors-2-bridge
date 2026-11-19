@@ -7,6 +7,7 @@
 # EW2_PROFILE=1 enables the guest profilers (logs/play.log), then: python3 tools/log_digest.py
 # Usage: ./play_wsl.sh [WIDTHxHEIGHT]   Logs: logs/play.log (guest), logs/ew2gl.log, logs/http.log, logs/audio.log
 P=$(cd "$(dirname "$0")" && pwd)
+tp() { [ -e "$P/${2:-$1}" ] && echo "$P/${2:-$1}" || echo "${SHARED_3P:-$P/../__shared-third-party__}/$1"; }  # third-party: this project first, then ../__shared-third-party__
 cd "$P"
 mkdir -p logs ctl Saves build
 # Every start overwrites the logs, so the previous session is first moved to logs/history/<time>/ (the last 20 are kept).
@@ -29,7 +30,7 @@ if [ ! -x build/ew2gl ] || [ -n "$(find host/glbridge -newer build/ew2gl \( -nam
         > build/sdl2-x64/include/SDL2/_real_SDL_config.h
     L=/usr/lib/x86_64-linux-gnu
     cc -std=c11 -D_DEFAULT_SOURCE -D_REENTRANT -O2 -Wall -Ibuild/sdl2-x64/include -I/usr/include/SDL2 \
-        -Ithird_party/khronos/include -o build/ew2gl host/glbridge/ew3gl.c \
+        -I"$(tp khronos third_party/khronos)/include" -o build/ew2gl host/glbridge/ew3gl.c \
         $L/libSDL2-2.0.so.0 $L/libGLESv2.so.2 $L/libEGL.so.1 -lm -lpthread || exit 1
 fi
 
@@ -71,7 +72,7 @@ trap 'exit 130' INT TERM HUP
         export EW2_GL_PROFILE=1 EW2_PC_PROF=1 EW2_SYSCALL_PROF=1 EW2_ICALL_PROF=1 LOADER_TRACE=1
     fi
     # EW2_QEMU=path overrides; otherwise a locally built newer qemu-arm (tools/build_qemu.sh), else the system one.
-    QEMU=${EW2_QEMU:-$P/third_party/qemu/qemu-arm}
+    QEMU=${EW2_QEMU:-$(tp qemu third_party/qemu)/qemu-arm}
     [ -x "$QEMU" ] || QEMU=qemu-arm
     exec "$QEMU" port/build/ew2 ew2data
 ) > logs/play.log 2>&1 &

@@ -307,17 +307,18 @@ int main(int argc, char **argv) {
     char cmd[4096];
     snprintf(cmd, sizeof(cmd),
              "if [ ! -f /opt/ew2_rt/ew2data/base.apk ]; then "
+             "SR='%s/third_party/sysroot-armhf'; [ -d \"$SR\" ] || SR='%s/../__shared-third-party__/sysroot-armhf'; "
              "mkdir -p /opt/ew2_rt/sysroot/lib/arm-linux-gnueabihf /opt/ew2_rt/app /opt/ew2_rt/ew2data && "
-             "cp -rf '%s/third_party/sysroot-armhf/lib/arm-linux-gnueabihf/'*.so* /opt/ew2_rt/sysroot/lib/arm-linux-gnueabihf/ && "
-             "cp -rf '%s/third_party/sysroot-armhf/usr/lib/arm-linux-gnueabihf/'*.so* /opt/ew2_rt/sysroot/lib/arm-linux-gnueabihf/ && "
-             "cp -f '%s/third_party/sysroot-armhf/lib/arm-linux-gnueabihf/ld-2.31.so' /opt/ew2_rt/sysroot/lib/ld-linux-armhf.so.3 && "
+             "cp -rf \"$SR/lib/arm-linux-gnueabihf/\"*.so* /opt/ew2_rt/sysroot/lib/arm-linux-gnueabihf/ && "
+             "cp -rf \"$SR/usr/lib/arm-linux-gnueabihf/\"*.so* /opt/ew2_rt/sysroot/lib/arm-linux-gnueabihf/ && "
+             "cp -f \"$SR/lib/arm-linux-gnueabihf/ld-2.31.so\" /opt/ew2_rt/sysroot/lib/ld-linux-armhf.so.3 && "
              "cp -f '%s/sdl-arm/lib/libSDL2-2.0.so.0' /opt/ew2_rt/sysroot/lib/arm-linux-gnueabihf/libSDL2-2.0.so.0 && "
              "chmod +x /opt/ew2_rt/sysroot/lib/ld-linux-armhf.so.3 /opt/ew2_rt/sysroot/lib/arm-linux-gnueabihf/*.so* && "
              "cp -rf '%s/ew2data/base.apk' '%s/ew2data/glu_properties.txt' '%s/ew2data/lib' '%s/ew2data/Android' /opt/ew2_rt/ew2data/; "
              "fi && "
              "cp -f '%s/port/build/ew2' /opt/ew2_rt/app/ew2 && chmod +x /opt/ew2_rt/app/ew2 && "
              "mkdir -p '%s/Saves' && rm -rf /opt/ew2_rt/ew2data/files && ln -sfn '%s/Saves' /opt/ew2_rt/ew2data/files",
-             root, root, root, root, root, root, root, root, root, root, root);
+             root, root, root, root, root, root, root, root, root, root);
     if (system(cmd) != 0) {
         fprintf(stderr, "[wsl_runner] warning: staging command returned non-zero\n");
     }

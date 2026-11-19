@@ -63,8 +63,7 @@ host/build-native/ew2host.exe --selftest
 ```
 
 Результат: `host/build-native/ew2host.exe` (7 МБ), первая сборка ~2 минуты (dynarmic ~165 файлов).
-По умолчанию исходники ищутся в `third_party/dynarmic` и `third_party/boost` проекта, затем в соседнем проекте
-`../eternity-warriors-3-probe/third_party/`. Откуда их брать:
+По умолчанию исходники ищутся в общей папке `../__shared-third-party__/` (`dynarmic/` и `boost/`). Откуда их брать:
 
 - dynarmic: https://github.com/merryhime/dynarmic, собиралось на коммите `a46601580d5512d324104f985b5f0209dc980ddc`
   (подмодули — `git clone --recursive`);

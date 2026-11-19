@@ -111,9 +111,9 @@ tools/setup_deps.sh
 qemu/build.sh
 ```
 
-Собирает в контейнере QEMU 11.1.2 с патчами из `qemu/patches/` и кладёт результат в `third_party/qemu/qemu-arm`
+Собирает в контейнере QEMU 11.1.2 с патчами из `qemu/patches/` и кладёт результат в `../__shared-third-party__/qemu/qemu-arm`
 (~1 минута). `play_wsl.sh` использует его автоматически. Исходники берутся из архива `qemu-11.1.2.tar.xz`
-(по умолчанию из соседнего проекта `../nova3probe/downloads/`, либо `QEMU_TARBALL=путь`, оригинал:
+(по умолчанию из `../__shared-third-party__/downloads/`, либо `QEMU_TARBALL=путь`, оригинал:
 https://download.qemu.org/qemu-11.1.2.tar.xz). Без него используется системный `qemu-arm`: игра работает, но ~20%
 медленнее.
 
@@ -331,7 +331,7 @@ play_win.cmd / play_win.py / play_wsl.sh
 | `host/glbridge/` | хост рендера `ew3gl.c` и модули `*.inc` (общий код для Windows и Linux) |
 | `qemu/` | Dockerfile, `build.sh` и патчи для собственного `qemu-arm` |
 | `tools/` | сборки (`build_*.sh`), подготовка данных (`setup_*`), анализ логов |
-| `third_party/` | внешние зависимости (в git не входят: `qemu/`, `angle/`, `sdl2-win/`, `khronos/`; `qemu-guest/` — старый VM-путь) |
+| `third_party/` | `qemu-guest/` — код старого VM-пути; внешние зависимости (`qemu/`, `angle/`, `sdl2-win/`, `khronos/`, `boost/`, `dynarmic/`) вынесены в общую папку `../__shared-third-party__/` |
 | `gamebin/` | ваши APK и OBB (в git не входят) |
 | `ew2data/` | распакованная игра, кэши (в git не входят) |
 | `Saves/`, `Optional_Cheat_Save/` | сохранения |
@@ -350,13 +350,13 @@ play_win.cmd / play_win.py / play_wsl.sh
 | ARM-порт и SDL-шим | `tools/build_port_wsl.sh` | `port/build/ew2`, `sdl-arm/lib/libSDL2-2.0.so.0` |
 | GL-мост для GPU Windows | `tools/build_host_win.sh` | `host/build-win/ew2gl.exe` |
 | GL-мост Linux (Mesa) | собирается из `play_wsl.sh` | `build/ew2gl` |
-| qemu-arm | `qemu/build.sh` (Docker) | `third_party/qemu/qemu-arm` |
+| qemu-arm | `qemu/build.sh` (Docker) | `../__shared-third-party__/qemu/qemu-arm` |
 | Данные игры | `tools/setup_ew2data.py` | `ew2data/` |
-| Зависимости GPU-хоста | `tools/setup_deps.sh` | `third_party/{khronos,sdl2-win,angle}` |
+| Зависимости GPU-хоста | `tools/setup_deps.sh` | `../__shared-third-party__/{khronos,sdl2-win,angle}` |
 | Нативный хост Windows (основа) | `host/build.cmd` или `host/build.sh` | `host/build-native/ew2host.exe` |
 
 Варианты qemu: `QEMU_VARIANT=имя QEMU_PATCHES="..." qemu/build.sh` собирает бинарник
-`third_party/qemu/qemu-arm-имя` (например, без `x86_neon.patch` для сравнения скорости). Для Android-сборки патчи
+`../__shared-third-party__/qemu/qemu-arm-имя` (например, без `x86_neon.patch` для сравнения скорости). Для Android-сборки патчи
 `qemu/patches/nova3.patch` и `qemu/patches/android/*.patch` рассчитаны на aarch64-хост (под `#if defined(__aarch64__)`).
 
 ---
@@ -368,7 +368,7 @@ play_win.cmd / play_win.py / play_wsl.sh
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
 | `EW2_HOST` | `gpu` | `gpu` — `ew2gl.exe` на видеокарте Windows; `linux` — Mesa в WSLg |
-| `EW2_QEMU` | `third_party/qemu/qemu-arm`, иначе системный | какой `qemu-arm` использовать |
+| `EW2_QEMU` | `../__shared-third-party__/qemu/qemu-arm`, иначе системный | какой `qemu-arm` использовать |
 | `EW2_TARGET_FPS` | 120 | ограничение частоты кадров |
 | `EW2_GL_VSYNC` | 0 | вертикальная синхронизация |
 | `EW2_GL_RENDERER` | `Adreno (TM) 420` | имя GPU, которое видит игра (влияет на выбор качества) |

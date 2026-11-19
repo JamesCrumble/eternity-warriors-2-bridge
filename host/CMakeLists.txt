@@ -5,8 +5,8 @@
 #
 # Build: host\build.cmd on Windows, or host/build.sh from WSL (both use Visual Studio's MSVC + CMake + Ninja).
 # Dependencies (sources, not installed anywhere):
-#   -DDYNARMIC_DIR=<dynarmic checkout>   default third_party/dynarmic, then ../eternity-warriors-3-probe/third_party/dynarmic
-#   -DBOOST_DIR=<folder that contains boost/>  default third_party/boost, then the same folder of the EW3 project
+#   -DDYNARMIC_DIR=<dynarmic checkout>   default third_party/dynarmic, else ../__shared-third-party__/dynarmic
+#   -DBOOST_DIR=<folder that contains boost/>  default third_party/boost, else ../__shared-third-party__/boost
 cmake_minimum_required(VERSION 3.20)
 project(ew2host CXX C)
 
@@ -15,7 +15,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 set(EW2_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
-set(EW3_SIBLING ${EW2_ROOT}/../eternity-warriors-3-probe/third_party)
+set(SHARED_3P ${EW2_ROOT}/../__shared-third-party__)   # used when the project has no third_party/<name>
 
 set(DYNARMIC_DIR "" CACHE PATH "dynarmic source tree")
 set(BOOST_DIR "" CACHE PATH "folder that contains boost/ (headers only)")
@@ -24,8 +24,8 @@ foreach(dep DYNARMIC BOOST)
     if (NOT ${dep}_DIR)
         if (EXISTS ${EW2_ROOT}/third_party/${sub})
             set(${dep}_DIR ${EW2_ROOT}/third_party/${sub})
-        elseif (EXISTS ${EW3_SIBLING}/${sub})
-            set(${dep}_DIR ${EW3_SIBLING}/${sub})
+        elseif (EXISTS ${SHARED_3P}/${sub})
+            set(${dep}_DIR ${SHARED_3P}/${sub})
         endif()
     endif()
 endforeach()

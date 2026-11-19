@@ -2,11 +2,12 @@
 # Builds port/build/ew2 and sdl-arm/lib/libSDL2-2.0.so.0 with the system arm-linux-gnueabihf toolchain (no zig).
 set -eu
 P=$(cd "$(dirname "$0")/.." && pwd)
+tp() { [ -e "$P/${2:-$1}" ] && echo "$P/${2:-$1}" || echo "${SHARED_3P:-$P/../__shared-third-party__}/$1"; }  # third-party: this project first, then ../__shared-third-party__
 cd "$P"
 CROSS=arm-linux-gnueabihf-
 SDLINC=/usr/include/SDL2
 mkdir -p port/build/obj sdl-arm/lib
-INC="-Iport -Iport/src -Iport/android -Iport/loader -Iport/thunks -Iport/thunks/libc -Iport/thunks/libc/generated -Iport/jni -Ithird_party/khronos/include -I$SDLINC"
+INC="-Iport -Iport/src -Iport/android -Iport/loader -Iport/thunks -Iport/thunks/libc -Iport/thunks/libc/generated -Iport/jni -I"$(tp khronos third_party/khronos)/include" -I$SDLINC"
 FLAGS=(-std=gnu++2a -O2 -mcpu=cortex-a15 -marm -fno-strict-aliasing -fuse-cxa-atexit -Wno-unused-parameter '-DPORT_ENV_PREFIX="EW2"' -D_REENTRANT -DMESA_EGL_NO_X11_HEADERS -DEGL_NO_X11 -MMD -MP)
 SRCS=$(for d in src android loader thunks/libc thunks/khronos jni jni/classes third_party/powervr; do ls port/$d/*.cpp; done)
 OBJS=""

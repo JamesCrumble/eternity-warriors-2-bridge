@@ -1,12 +1,12 @@
 #!/bin/bash
-# Puts ANGLE (libEGL.dll + libGLESv2.dll, x64) into third_party/angle/bin and writes
-# third_party/angle/libGLESv2.def, from which the host build makes an import library
+# Puts ANGLE (libEGL.dll + libGLESv2.dll, x64) into third_party/angle/bin (if the project has it, else ../__shared-third-party__/angle/bin) and writes
+# libGLESv2.def next to it, from which the host build makes an import library
 # (ANGLE as shipped inside applications comes without .lib files).
 # Usage: tools/angle_setup.sh [directory with the two DLLs]   default: OBS Studio (Chromium build: system DLLs only; Firefox's needs mozglue.dll)
 set -eu
 P=$(cd "$(dirname "$0")/.." && pwd)
 SRC=${1:-"/mnt/c/Program Files/obs-studio/obs-plugins/64bit"}
-A="$P/third_party/angle"
+if [ -d "$P/third_party/angle" ]; then A="$P/third_party/angle"; else A="$(cd "$P/../__shared-third-party__" && pwd)/angle"; fi
 mkdir -p "$A/bin"
 cp "$SRC/libEGL.dll" "$SRC/libGLESv2.dll" "$A/bin/"
 chmod u+w "$A/bin/"*.dll

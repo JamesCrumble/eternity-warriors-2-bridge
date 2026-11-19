@@ -594,8 +594,12 @@ def main():
     if use_wsl:
         guest_proc = start_wsl_guest(w, h, play_log)
     else:
+        # qemu binaries: third_party/qemu of the project if present, else ../__shared-third-party__/qemu
+        QEMU_DIR = os.path.join(ROOT, "third_party", "qemu")
+        if not os.path.exists(QEMU_DIR):
+            QEMU_DIR = os.path.join(ROOT, "..", "__shared-third-party__", "qemu")
         qemu_exe = os.path.join(
-            ROOT, "third_party", "qemu", "xpack-qemu-arm-9.2.4-1", "bin", "qemu-system-arm.exe"
+            QEMU_DIR, "xpack-qemu-arm-9.2.4-1", "bin", "qemu-system-arm.exe"
         )
         gpu_arg = os.environ.get("EW2_GPU", "").strip().replace(" ", "_")
         target_fps = os.environ.get("EW2_TARGET_FPS", "120").strip()

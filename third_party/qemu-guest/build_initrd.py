@@ -4,6 +4,10 @@ import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(ROOT)
+# armhf sysroot: third_party/sysroot-armhf of the project if present, else ../__shared-third-party__/sysroot-armhf
+SYSROOT = os.path.join(ROOT, "third_party", "sysroot-armhf")
+if not os.path.exists(SYSROOT):
+    SYSROOT = os.path.join(ROOT, "..", "__shared-third-party__", "sysroot-armhf")
 
 ino = 1
 
@@ -61,11 +65,11 @@ def main():
         for d in ["lib", "lib/arm-linux-gnueabihf", "app", "ew2data", "ew2data/files"]:
             ensure_dir(f_out, d)
 
-        ld_data = open("third_party/sysroot-armhf/lib/arm-linux-gnueabihf/ld-2.31.so", "rb").read()
+        ld_data = open(os.path.join(SYSROOT, "lib/arm-linux-gnueabihf/ld-2.31.so"), "rb").read()
         cpio_entry(f_out, "lib/ld-linux-armhf.so.3", ld_data, 0o100755)
 
         for src_dir in ["lib/arm-linux-gnueabihf", "usr/lib/arm-linux-gnueabihf"]:
-            full_dir = os.path.join("third_party/sysroot-armhf", src_dir)
+            full_dir = os.path.join(SYSROOT, src_dir)
             for fn in sorted(os.listdir(full_dir)):
                 fp = os.path.join(full_dir, fn)
                 if os.path.isfile(fp) and ".so" in fn:
